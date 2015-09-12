@@ -146,7 +146,6 @@ var filterIgnore = function( ignore, id, origId ){
      */
     mergePath = function( options, deps, base ){
         var config = options.config;
-
         return deps.map(function( item, i ){
             var origId = item.origId,
                 arr, modId;
@@ -193,13 +192,21 @@ var filterIgnore = function( ignore, id, origId ){
                 arr = arr.concat( modId );
                 origId = arr.join( '/' );
             }
-
-            return {
-                id : item.id,
+            //=======================================================================
+            var id;
+            if(options.base && options.basepath){
+                id = path.relative(options.basepath, path.resolve( base, origId ));
+                id = id.replace(/\\/g, "/")//将windows下的反斜线转成斜线
+                       .replace(/^\/|\.\w+$/g, "");//去掉路径最前面的斜杠和和后缀
+            }
+            
+            var data = {
+                id : id,
                 extName : item.extName,
                 path : path.resolve( base, origId ),
                 origId : origId
             };
+            return data;
         });
     },
 
@@ -209,10 +216,10 @@ var filterIgnore = function( ignore, id, origId ){
      * param { String } 模块标识
      * return { Object } filePath: 过滤query和hash后的模块标识,id: 模块id,extName: 模块后缀
      */
-    modPathResolve = function( options, filePath ){
+    modPathResolve = function( options, filePath){
         // 过滤query(?)和hash(#)
         filePath = filePath.replace( rQueryHash, '' );
-
+        //=================================================================================
         var id = filePath.match( rModId )[1],
             extName = path.extname( filePath );
 
@@ -221,7 +228,7 @@ var filterIgnore = function( ignore, id, origId ){
         }
 
         return {
-            id : id,
+            id : options.base ? path.relative(options.basepath, filePath) : id,
             path : filePath,
             extName : extName
         };
@@ -532,9 +539,13 @@ var filterIgnore = function( ignore, id, origId ){
      * param { String } 模块的绝对路径
      * param { promise }
      */
-    parseContent = function( options, contents, filePath ){
+    parseContent = function( options, contents, file ){
         return new Promise(function( resolve ){
-            var pathResult = modPathResolve( options, filePath ),
+            var filePath = file.path;
+            if (options.base) {
+                options.basepath = path.resolve(file.cwd, file.base);
+            }
+            var pathResult = modPathResolve( options, filePath),
                 deps = parseDeps( options, contents, pathResult );
 
             if( deps.length ){
@@ -553,12 +564,17 @@ var filterIgnore = function( ignore, id, origId ){
                 config : {},
                 unique : {},
                 uuid : 0,
+                base : false,
                 contents : '',
                 encoding : 'UTF-8',
                 verbose : !!~process.argv.indexOf( '--verbose' )
             };
 
         if( options ){
+            if( options.base ){
+                o.base = true;
+            }
+            
             if( options.ignore ){
                 o.ignore = options.ignore;
             }
@@ -577,8 +593,10 @@ var filterIgnore = function( ignore, id, origId ){
         }
 
         return through.obj(function( file, enc, callback ){
+            //=======================================================================================
+            
             if( file.isBuffer() ){
-                parseContent( o, file.contents.toString(), file.path )
+                parseContent( o, file.contents.toString(), file )
                     .then(function(){
                         var contents = comboContent( o );
                         file.contents = contents;
