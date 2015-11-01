@@ -10,6 +10,7 @@ var Promise = require('promise'),
     through = require('through2'),
     gutil = require('gulp-util'),
     execPlugins = require('./lib/execplugins'),
+    hasReadFile = [],
 
     rFirstStr = /[\s\r\n\=]/,
     rDefine = /define\(\s*(['"](.+?)['"],)?/,
@@ -23,7 +24,6 @@ var Promise = require('promise'),
     rQueryHash = /[\?#].*$/,
     rExistId = /define\(\s*['"][^\[\('"\{\r\n]+['"]\s*,?/,
     rSeajsUse = /"(?:\\"|[^"])*"|'(?:\\'|[^'])*'|\/\*[\S\s]*?\*\/|\/(?:\\\/|[^\/\r\n])+\/(?=[^\/])|\/\/.*|\.\s*seajs\.use|(?:^|[^$])\bseajs\.use\s*\((.+)/g,
-
     rRequire = /"(?:\\"|[^"])*"|'(?:\\'|[^'])*'|\/\*[\S\s]*?\*\/|\/(?:\\\/|[^\/\r\n])+\/(?=[^\/])|\/\/.*|\.\s*require|(?:^|[^$])\brequire\s*\(\s*(["'])(.+?)\1\s*\)/g;
 
 const PLUGIN_NAME = 'gulp-seajs-cmobo';
@@ -136,6 +136,8 @@ var filterIgnore = function (ignore, id, origId) {
     },
 
     /*
+     * ====================================4
+     * (此方法现在已经不用了)
      * 基于base将依赖模块的相对路径转化成绝对路径
      * 同时对seajs.config中的paths、alias、vars，还有options.map进行处理
      * param { Object } 数据存储对象
@@ -143,15 +145,15 @@ var filterIgnore = function (ignore, id, origId) {
      * param { String } 基础路径
      * return { Array } 依赖模块的绝对路径列表
      */
+    /*
     mergePath = function (options, deps, base) {
         var config = options.config;
         return deps.map(function (item, i) {
             var origId = item.origId,
                 arr, modId, id;
-
             // 防止多次merge
             if (item.path) {
-                return;
+                return item;
             }
 
             // 处理build.json => map
@@ -193,17 +195,18 @@ var filterIgnore = function (ignore, id, origId) {
             }
             //=======================================================================
 
+            
             id = item.id;
-            if (options.ignore && options.ignore.indexOf(id) > -1) {
-                //console.log(id);
-            } else {
-                if (options.base && options.basepath) {
-                    id = path.relative(options.basepath, path.resolve(base, origId));
-                    id = id.replace(/\\/g, "/") //将windows下的反斜线转成斜线
-                        .replace(/^\/|\.\w+$/g, ""); //去掉路径最前面的斜杠和和后缀
-                }
-            }
-
+//            if (options.ignore && options.ignore.indexOf(id) > -1) {
+//                //console.log(id);
+//            } else {
+//                if (options.base && options.basepath) {
+//                    id = path.relative(options.basepath, path.resolve(base, origId));
+//                    id = id.replace(/\\/g, "/") //将windows下的反斜线转成斜线
+////                        .replace(/^\/|\.\w+$/g, ""); //去掉路径最前面的斜杠和和后缀
+//                        .replace(/^\/|\.js$/g, ""); //去掉路径最前面的斜杠和和后缀
+//                }
+//            }
             var data = {
                 id: id,
                 extName: item.extName,
@@ -213,30 +216,33 @@ var filterIgnore = function (ignore, id, origId) {
             return data;
         });
     },
+    */
 
     /*
-     * 解析模块标识
+     * ===========================2
+     * 根据文件的绝对地址解析模块标识
      * param { Object } 配置参数
-     * param { String } 模块标识
+     * param { String } 文件的物理地址
      * return { Object } filePath: 过滤query和hash后的模块标识,id: 模块id,extName: 模块后缀
      */
     modPathResolve = function (options, filePath) {
         // 过滤query(?)和hash(#)
         filePath = filePath.replace(rQueryHash, '');
         //=================================================================================
-        var id = filePath.match(rModId)[1],
-            extName = path.extname(filePath);
-
-        if (extName && extName === '.js') {
-            id = id.replace(extName, '');
-        }
-
-        if (options.ignore && options.ignore.indexOf(id) > -1) {
-            id = id;
-        } else {
-            id = options.base ? path.relative(options.basepath, filePath) : id;
-        }
-
+        var match = filePath.match(rModId),
+            id = match[1],
+            extName = match[2];
+        
+//        if (extName && extName === '.js') {
+//            id = id.replace(extName, '');
+//        }
+        id = path.relative(options.basepath, filePath);
+//        if (options.ignore && options.ignore.indexOf(id) > -1) {
+//            filePath = id;
+//        } else {
+//            id = options.base ? path.relative(options.basepath, filePath) : id;
+//        }
+//        
         return {
             id: id,
             path: filePath,
@@ -249,10 +255,10 @@ var filterIgnore = function (ignore, id, origId) {
      * param { Object } 配置参数
      * param { Array } 依赖模块
      * param { promise }
+     * （递归方法）
      */
     readDeps = function (options, parentDeps) {
         var childDeps = [];
-
         promiseArr = parentDeps.map(function (item) {
             return new Promise(function (resolve, reject) {
                 var id = item.id,
@@ -308,18 +314,21 @@ var filterIgnore = function (ignore, id, origId) {
                     if (!extName && filePath.slice(-3) !== '.js') {
                         filePath += '.js'
                     }
+                    if (hasReadFile.indexOf(filePath) === -1) {
+                        try {
+                            console.log('start read file : ' + filePath);
+                            contents = fs.readFileSync(filePath, options.encoding);
+                        } catch (_) {
+                            reject("File [" + filePath + "] not found.");
+                            return;
+                        }
 
-                    try {
-                        contents = fs.readFileSync(filePath, options.encoding);
-                    } catch (_) {
-                        reject("File [" + filePath + "] not found.");
-                        return;
-                    }
+                        deps = parseDeps(options, contents, item);
 
-                    deps = parseDeps(options, contents, item);
-
-                    if (deps.length) {
-                        childDeps = childDeps.concat(deps);
+                        if (deps.length) {
+                            childDeps = childDeps.concat(deps);
+                        }
+                        hasReadFile.push(filePath);
                     }
 
                     resolve();
@@ -347,45 +356,65 @@ var filterIgnore = function (ignore, id, origId) {
      * param { Object } 文件内容
      * return { Array } 依赖模块列表
      */
-    pullDeps = function (options, reg, contents) {
+    pullDeps = function (options, reg, contents, base) {
         var deps = [],
-            matches, origId;
+            matches,
+            origId,
+            filePath;
 
         reg.lastIndex = 0;
 
         while ((matches = reg.exec(contents)) !== null) {
             origId = matches[2];
-
             if (origId && origId.slice(0, 4) !== 'http') {
-                depPathResult = modPathResolve(options, origId);
-
-                deps.push({
-                    id: depPathResult.id,
-                    origId: depPathResult.path,
-                    extName: depPathResult.extName
-                });
+                if (filterIgnore(options.ignore, origId)) {
+                    deps.push({
+                        id: origId,
+                        origId: origId,
+                        extName: '',
+                        path: ''
+                    });
+                } else {
+                    if (base) {
+                        filePath = path.resolve(base, origId) + '.js';
+                    }
+                    modData = modPathResolve(options, filePath);
+                    deps.push({
+                        id: modData.id,
+                        origId: origId,
+                        extName: modData.extName,
+                        path: base ? filePath : ''
+                    });
+                }
             }
         }
-
         return deps;
     },
 
     /*
+     * ==============================3
      * 解析依赖模块
      * param { Object } 配置参数
      * param { String } 文件内容
      * param { Object } 模块数据
      * return { Array } 依赖模块数据列表
+     *
+     * modData: { id: 'a', path: './a', extName: '' }
+     * id: 一般是文件名去掉 JS，
+     * path 除 main 文件，其它都是相对路径
+     * extName,
+     * origId: require 的 ID
      */
     parseDeps = function (options, contents, modData) {
         var isSeajsUse = !!~contents.indexOf('seajs.use('),
             id = modData.id,
             deps = [],
+            base = path.resolve(modData.path, '..'),
             configResult, name, base, matches;
-
+        
         // 标准模块
         if (!isSeajsUse) {
-            deps = pullDeps(options, rRequire, contents);
+            deps = pullDeps(options, rRequire, contents, base);
         }
         // 解析seajs.use
         else {
@@ -402,15 +431,23 @@ var filterIgnore = function (ignore, id, origId) {
                 var _deps = [];
 
                 if (~item.indexOf('seajs.use')) {
-                    _deps = pullDeps(options, rDeps, item);
+                    _deps = pullDeps(options, rDeps, item, base);
                     deps = deps.concat(_deps);
                 }
             });
         }
 
-        base = path.resolve(modData.path, '..');
-        deps = mergePath(options, deps, base);
-
+        /*
+        * 关键方法，找出此文件的依赖文件
+        * 输入deps = [{id: , extName: , origId: }...]
+        * 输出deps = [{id: , extName: , path: , origId: }...]
+        */
+        //deps = mergePath(options, deps, base);
+        
+        
+        /*
+        * 将每个文件对应的依赖放在 options中
+        */
         options.modArr.push({
             id: id,
             deps: deps,
@@ -435,34 +472,35 @@ var filterIgnore = function (ignore, id, origId) {
             isSeajsUse = !!~contents.indexOf('seajs.use('),
             origId = modData.origId,
             deps = [];
+        idMap = {};
+        if (modData.deps) {
+            modData.deps.forEach(function (item) {
+                idMap[item.origId] = item.id;
+            });
+        }
 
         // 标准模块
         if (!isSeajsUse) {
+                        
             contents = contents.replace(rRequire, function ($, _, $2) {
                 var result = $,
                     depId, depOrigId, depPathResult, firstStr;
 
                 if ($2 && $2.slice(0, 4) !== 'http') {
-                    depPathResult = modPathResolve(options, $2);
                     firstStr = result.charAt(0);
-                    depOrigId = depPathResult.path;
-                    depId = idMap[depOrigId] || depPathResult.id;
+                    depId = idMap[$2];
                     deps.push(depId);
-
                     result = "require('" + depId + "')";
-
                     if (rFirstStr.test(firstStr)) {
                         result = firstStr + result;
                     }
                 }
-
                 return result;
             });
 
             // 为匿名模块添加模块名，同时将依赖列表添加到头部
             contents = contents.replace(rDefine, function () {
-                var id = idMap[origId];
-
+                var id = modData.id;
                 return deps.length ?
                     "define('" + id + "',['" + deps.join("','") + "']," :
                     "define('" + id + "',";
@@ -477,9 +515,7 @@ var filterIgnore = function (ignore, id, origId) {
                             depPathResult, depId;
 
                         if ($2 && $2.slice(0, 4) !== 'http') {
-                            depPathResult = modPathResolve(options, $2);
-                            depId = depPathResult.id;
-
+                            depId = idMap[$2];
                             _result = "'" + depId + "'";
                         }
 
@@ -510,7 +546,6 @@ var filterIgnore = function (ignore, id, origId) {
             var obj = {},
                 id = item.id,
                 filePath = item.path;
-
             if (!pathUnique[filePath]) {
                 pathUnique[filePath] = true;
                 newModArr.push(item);
@@ -524,7 +559,7 @@ var filterIgnore = function (ignore, id, origId) {
                 idMap[item.origId] = id;
             }
         });
-
+        
         newModArr.forEach(function (item) {
             var newContents = transform(options, item, idMap);
             if (newContents) {
@@ -540,6 +575,7 @@ var filterIgnore = function (ignore, id, origId) {
     },
 
     /*
+     * ======================1
      * 解析模块的内容，如果有依赖模块则开始解析依赖模块
      * param { Object } 数据存储对象
      * param { String } 文件内容
@@ -547,13 +583,18 @@ var filterIgnore = function (ignore, id, origId) {
      * param { promise }
      */
     parseContent = function (options, contents, file) {
+        gutil.log(gutil.colors.green('start read file : ' + file.path));
         return new Promise(function (resolve) {
             var filePath = file.path;
+            //添加模块 ID 的相对路径：file.cwd-当前gulp 执行路径；file.base-当前配置的 base 相对路径
             if (options.base) {
                 options.basepath = path.resolve(file.cwd, file.base);
+            } else {
+                options.basepath = file.cwd;
             }
-            var pathResult = modPathResolve(options, filePath),
-                deps = parseDeps(options, contents, pathResult);
+            var modData = modPathResolve(options, filePath),
+                deps;
+                deps = parseDeps(options, contents, modData);
 
             if (deps.length) {
                 resolve(readDeps(options, deps));
